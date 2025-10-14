@@ -142,16 +142,28 @@ runs:
         set -euo pipefail
         cd .zks
         nohup anvil --load-state zkos-l1-state.json --port ${{ inputs.l1_port }} > anvil.log 2>&1 &
-        for i in {1..60}; do
-          if curl -sS -X POST "http://127.0.0.1:${{ inputs.l1_port }}" \
-              -H 'content-type: application/json' \
-              --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | grep -q '"result"'; then
+        echo $! > anvil.pid
+        for i in $(seq 1 60); do
+          # short, bounded curl (no hang)
+          reply="$(curl -fsS --connect-timeout 1 --max-time 2 -X POST "http://127.0.0.1:${{ inputs.l1_port }}" \
+            -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}')" || true
+          if printf '%s' "$reply" | grep -q '"jsonrpc":"2.0"'; then
             echo "Anvil ready"
-            exit 0
+            break
+          fi
+          # process died?
+          if ! kill -0 "$(cat anvil.pid)" 2>/dev/null; then
+            echo "Anvil died during wait. Last logs:"; tail -n 200 anvil.log || true
+            exit 1
           fi
           sleep 1
+          if [ "$i" = "60" ]; then
+            echo "Anvil not ready after $i s"; tail -n 200 anvil.log || true; exit 1
+          fi
         done
-        echo "Anvil not ready"; tail -n 200 anvil.log || true; exit 1
+        # fully detach for safety
+        disown || true
 
     - name: Start ZKsync OS server (L2) and wait
       shell: bash
@@ -173,24 +185,10 @@ runs:
         nohup ./zksync_os_bin > l2.log 2>&1 &
         echo $! > l2.pid
         sleep 1
-
         if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
           echo "ZKsync OS exited immediately. Dumping l2.log:"; sed -n '1,200p' l2.log || true
           exit 1
         fi
-
-        echo "==> Waiting for L2 TCP on :${{ inputs.l2_port }}"
-        for i in $(seq 1 ${{ inputs.wait_seconds }}); do
-          if (exec 3<>/dev/tcp/127.0.0.1/${{ inputs.l2_port }}) 2>/dev/null; then
-            exec 3>&- 3<&-
-            break
-          fi
-          if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
-            echo "L2 died during TCP wait. Last logs:"; tail -n 200 l2.log || true; exit 1
-          fi
-          sleep 1
-          [ "$i" = "${{ inputs.wait_seconds }}" ] && { echo "TCP not open after $i s"; tail -n 200 l2.log || true; exit 1; }
-        done
 
         echo "==> Waiting for JSON-RPC (eth_chainId) on :${{ inputs.l2_port }}"
         first_reply=""
@@ -203,15 +201,13 @@ runs:
             -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
 
-          [ -z "${first_reply}" ] && [ -n "${reply}" ] && first_reply="${reply}"
+          [ -z "$first_reply" ] && [ -n "$reply" ] && first_reply="$reply"
 
-          # Ready if it looks like a JSON-RPC envelope (no PCRE; plain substrings)
-          if echo "${reply}" | grep -q '"jsonrpc":"2.0"'; then
-            if echo "${reply}" | grep -q '"result"'; then
-              cid="$(printf "%s" "${reply}" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+          # Ready if it looks like JSON-RPC (result OR error)
+          if printf '%s' "$reply" | grep -q '"jsonrpc":"2.0"'; then
+            if printf '%s' "$reply" | grep -q '"result"'; then
+              cid="$(printf "%s" "$reply" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
               [ -n "${cid}" ] && echo "eth_chainId: ${cid}"
-            else
-              echo "JSON-RPC responded with error; treating as alive"
             fi
             echo "L2 JSON-RPC is responding"
             break
@@ -225,7 +221,8 @@ runs:
             exit 1
           fi
         done
-
+        # fully detach for safety
+        disown || true
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
