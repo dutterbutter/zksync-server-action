@@ -6,11 +6,9 @@ Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and
 
 ## Features
 
-✅ Automatically resolves `latest` release tag via GitHub API
-✅ Supports `include_prerelease: true` for pre-release testing
-✅ Downloads official binaries + state (`genesis.json`, `zkos-l1-state.json`)
-✅ Boots both **L1 (Anvil)** and **L2 (zksync_os_server)**
-✅ Exports `ETH_RPC` and `ZKSYNC_RPC` for your subsequent test steps
+- Downloads official binaries + state (`genesis.json`, `zkos-l1-state.json`)
+- Boots both **L1 (Anvil)** and **L2 (zksync_os_server)**
+- Exports `ETH_RPC` and `ZKSYNC_RPC` for your subsequent test steps
 
 ## Quick Start
 
