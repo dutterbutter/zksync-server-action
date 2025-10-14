@@ -163,73 +163,37 @@ runs:
         # fully detach for safety
         disown || true
 
-    - name: Start ZKsync OS server (L2) and wait-until-ready (auto)
+    - name: Start ZKsync OS server (L2) — no-wait
       shell: bash
       run: |
         set -euo pipefail
         cd .zks
 
-        echo "==> ZKsync OS binary info"
-        chmod +x ./zksync_os_bin || true
-        ./zksync_os_bin --version || true
-        ./zksync_os_bin --help | sed -n '1,60p' || true
-
-        echo "==> Launching ZKsync OS (fully detached)"
+        # Env for the server
         export L1_RPC="http://127.0.0.1:${{ inputs.l1_port }}"
         export GENESIS="$(pwd)/genesis/genesis.json"
         export PORT="${{ inputs.l2_port }}"
         export RUST_LOG=info
 
-        # fully detached: stdin closed; logs to l2.log
-        nohup ./zksync_os_bin > l2.log 2>&1 < /dev/null &
+        echo "Launching zksync_os_bin fully detached..."
+        # Start in a brand-new session, with stdin closed and logs going to l2.log
+        setsid bash -c 'exec ./zksync_os_bin </dev/null >>l2.log 2>&1' &
         echo $! > l2.pid
-        sleep 1
 
+        # Give it a moment to bind the port
+        sleep 3
+
+        # If it died instantly, fail with logs for visibility
         if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
-          echo "ZKsync OS exited immediately. Dumping l2.log:"; sed -n '1,200p' l2.log || true
+          echo "zksync_os_bin exited during initial 3s grace. Dumping l2.log:"
+          sed -n '1,200p' l2.log || true
           exit 1
         fi
 
-        echo "==> Waiting for JSON-RPC on :${{ inputs.l2_port }} (cURL probe, max 120s)"
-        DEADLINE=$(( $(date +%s) + 120 ))
+        # Explicitly detach from the job table so the step can finish no matter what
+        disown || true
 
-        while :; do
-          # fail fast if process died
-          if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
-            echo "L2 died during wait. Last logs:"; tail -n 200 l2.log || true
-            exit 1
-          fi
-
-          # Single bounded probe (never blocks more than ~3s)
-          rpc="$(curl -fsS --http1.1 --connect-timeout 1 --max-time 3 \
-                  -H 'content-type: application/json' \
-                  -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
-                  --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
-
-          if printf '%s\n' "$rpc" | grep -q '"jsonrpc"[[:space:]]*:[[:space:]]*"2\.0"'; then
-            if printf '%s\n' "$rpc" | grep -q '"result"'; then
-              cid="$(printf "%s" "$rpc" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-              [ -n "$cid" ] && echo "eth_chainId: $cid"
-            else
-              echo "RPC responded (error envelope), treating as ready"
-            fi
-            echo "L2 JSON-RPC is responding — proceeding"
-            break
-          fi
-
-          if [ "$(date +%s)" -ge "$DEADLINE" ]; then
-            echo "L2 not ready within 120s — diagnostics:"
-            echo ">>> one-shot CURL -v to RPC"
-            curl -v --http1.1 --connect-timeout 2 --max-time 4 -H 'content-type: application/json' \
-              -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
-              --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' || true
-            echo ">>> tail l2.log (last 200)"
-            tail -n 200 l2.log || true
-            exit 1
-          fi
-
-          sleep 1
-        done
+        echo "ZKsync OS launched (pid: $(cat l2.pid)). Continuing…"
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
