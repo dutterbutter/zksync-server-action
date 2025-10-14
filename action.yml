@@ -102,6 +102,8 @@ runs:
         curl -sSL -O "$base/$tgz"
         curl -sSL -O "$base/zkos-l1-state.json"
         curl -sSL -O "$base/genesis.json"
+        mkdir -p genesis
+        mv -f genesis.json genesis/genesis.json
 
         # Show archive contents for debugging
         echo "Listing archive contents:"
@@ -165,7 +167,7 @@ runs:
         echo "==> Launching ZKsync OS"
         # Best-guess envs (ignored if unsupported)
         export L1_RPC="http://127.0.0.1:${{ inputs.l1_port }}"
-        export GENESIS="$(pwd)/genesis.json"
+        export GENESIS="$(pwd)/genesis/genesis.json"
         export PORT="${{ inputs.l2_port }}"
         export RUST_LOG=info
 
