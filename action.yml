@@ -156,17 +156,57 @@ runs:
       run: |
         set -euo pipefail
         cd .zks
+
+        echo "==> ZKsync OS binary info"
+        chmod +x ./zksync_os_bin || true
+        ./zksync_os_bin --version || true
+        ./zksync_os_bin --help | sed -n '1,120p' || true
+
+        echo "==> Launching ZKsync OS"
+        # Best-guess envs (ignored if unsupported)
+        export L1_RPC="http://127.0.0.1:${{ inputs.l1_port }}"
+        export GENESIS="$(pwd)/genesis.json"
+        export PORT="${{ inputs.l2_port }}"
+        export RUST_LOG=info
+
+        # Start and record PID
         nohup ./zksync_os_bin > l2.log 2>&1 &
+        echo $! > l2.pid
+        sleep 1
+
+        if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
+          echo "ZKsync OS server exited immediately. Dumping l2.log:"
+          sed -n '1,400p' l2.log || true
+          exit 1
+        fi
+
+        echo "==> Checking listening sockets (helps discover actual port)"
+        (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) || true
+
+        echo "==> Waiting for JSON-RPC on :${{ inputs.l2_port }}"
         for i in $(seq 1 ${{ inputs.wait_seconds }}); do
+          # If process died during wait, show logs and fail fast.
+          if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
+            echo "ZKsync OS server died during startup. Dumping l2.log:"
+            tail -n 400 l2.log || true
+            exit 1
+          fi
+
           if curl -sS -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
               -H 'content-type: application/json' \
               --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | grep -q '"result"'; then
-            echo "L2 JSON-RPC ready"
+            echo "L2 JSON-RPC ready on port ${{ inputs.l2_port }}"
             exit 0
           fi
           sleep 1
         done
-        echo "L2 JSON-RPC not ready"; tail -n 400 l2.log || true; exit 1
+
+        echo "L2 JSON-RPC not ready on port ${{ inputs.l2_port }}; dumping last 400 lines of l2.log:"
+        tail -n 400 l2.log || true
+        echo "Active listeners (to discover actual port, if any):"
+        (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) || true
+        exit 1
+
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
