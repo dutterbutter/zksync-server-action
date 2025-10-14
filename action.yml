@@ -196,7 +196,7 @@ runs:
 
           if curl -sS -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
               -H 'content-type: application/json' \
-              --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | grep -q '"result"'; then
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' | grep -q '"result"'; then
             echo "L2 JSON-RPC ready on port ${{ inputs.l2_port }}"
             exit 0
           fi
