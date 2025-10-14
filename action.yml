@@ -182,20 +182,17 @@ runs:
         echo "==> Waiting for L2 TCP on :${{ inputs.l2_port }}"
         for i in $(seq 1 ${{ inputs.wait_seconds }}); do
           if (exec 3<>/dev/tcp/127.0.0.1/${{ inputs.l2_port }}) 2>/dev/null; then
-            exec 3>&-  # close
+            exec 3>&- 3<&-
             break
           fi
-          # died while waiting?
           if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
             echo "L2 died during TCP wait. Last logs:"; tail -n 200 l2.log || true; exit 1
           fi
           sleep 1
-          if [ "$i" = "${{ inputs.wait_seconds }}" ]; then
-            echo "TCP not open after $i s"; tail -n 200 l2.log || true; exit 1
-          fi
+          [ "$i" = "${{ inputs.wait_seconds }}" ] && { echo "TCP not open after $i s"; tail -n 200 l2.log || true; exit 1; }
         done
 
-        echo "==> Waiting for JSON-RPC on :${{ inputs.l2_port }}"
+        echo "==> Waiting for JSON-RPC (eth_chainId) on :${{ inputs.l2_port }}"
         first_reply=""
         for i in $(seq 1 ${{ inputs.wait_seconds }}); do
           if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
@@ -206,14 +203,18 @@ runs:
             -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
 
-          # Record first non-empty reply for debugging
-          if [ -z "${first_reply}" ] && [ -n "${reply}" ]; then
-            first_reply="${reply}"
-          fi
+          [ -z "${first_reply}" ] && [ -n "${reply}" ] && first_reply="${reply}"
 
-          # Consider ready if it looks like *any* JSON-RPC response (result OR error)
-          if echo "${reply}" | grep -q '"jsonrpc"\s*:\s*"2\.0"'; then
-            echo "L2 JSON-RPC is responding"; break
+          # Ready if it looks like a JSON-RPC envelope (no PCRE; plain substrings)
+          if echo "${reply}" | grep -q '"jsonrpc":"2.0"'; then
+            if echo "${reply}" | grep -q '"result"'; then
+              cid="$(printf "%s" "${reply}" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+              [ -n "${cid}" ] && echo "eth_chainId: ${cid}"
+            else
+              echo "JSON-RPC responded with error; treating as alive"
+            fi
+            echo "L2 JSON-RPC is responding"
+            break
           fi
 
           sleep 1
@@ -224,6 +225,7 @@ runs:
             exit 1
           fi
         done
+
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
