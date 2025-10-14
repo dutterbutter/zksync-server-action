@@ -9,8 +9,7 @@ Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and
 ✅ Automatically resolves `latest` release tag via GitHub API
 ✅ Supports `include_prerelease: true` for pre-release testing
 ✅ Downloads official binaries + state (`genesis.json`, `zkos-l1-state.json`)
-✅ Boots both **L1 (Anvil)** and **L2 (zksync_os_bin)**
-✅ Waits until both RPC endpoints respond
+✅ Boots both **L1 (Anvil)** and **L2 (zksync_os_server)**
 ✅ Exports `ETH_RPC` and `ZKSYNC_RPC` for your subsequent test steps
 
 ## Quick Start
@@ -91,7 +90,6 @@ ZKSYNC_RPC=http://127.0.0.1:3050
 ## Troubleshooting
 
 * **Ports busy:** Adjust `l1_port` / `l2_port` if the runner already uses 8545 or 3050.
-* **Timeouts:** Increase `wait_seconds` if CI hardware is slow.
 * **Logs:**
 
   * `.zks/anvil.log` — Anvil output
