@@ -24,6 +24,9 @@ inputs:
   set_env:
     description: "If 'true', export ETH_RPC and ZKSYNC_RPC to GITHUB_ENV"
     default: "true"
+  boot_grace_seconds:
+    description: "Seconds to wait after starting each server before moving on"
+    default: "3"
 
 outputs:
   l1_rpc_url:
@@ -45,7 +48,6 @@ runs:
         echo "l1=http://127.0.0.1:${{ inputs.l1_port }}" >> "$GITHUB_OUTPUT"
         echo "l2=http://127.0.0.1:${{ inputs.l2_port }}" >> "$GITHUB_OUTPUT"
 
-    # Resolve 'latest' via GitHub API (optionally including pre-releases)
     - id: resolve
       uses: actions/github-script@v7
       with:
@@ -68,7 +70,7 @@ runs:
             const releases = await github.paginate(github.rest.repos.listReleases, {
               owner, repo, per_page: 20,
             });
-            const rel = releases.find(r => !r.draft); // first is newest
+            const rel = releases.find(r => !r.draft);
             if (!rel) throw new Error(`No releases found for ${owner}/${repo}`);
             return rel.tag_name;
           }
@@ -84,7 +86,6 @@ runs:
             core.setFailed(`Failed to resolve release tag for ${owner}/${repo}: ${err.message || err}`);
           }
 
-
     - name: Download release assets
       shell: bash
       run: |
@@ -97,103 +98,64 @@ runs:
 
         echo "Resolved tag: $tag"
         echo "Downloading assets from: $base"
-        curl -sSL -O "$base/$tgz"
-        curl -sSL -O "$base/zkos-l1-state.json"
-        curl -sSL -O "$base/genesis.json"
+        curl -fL --retry 5 --retry-all-errors -o "$tgz" "$base/$tgz"
+        curl -fL --retry 5 --retry-all-errors -O "$base/zkos-l1-state.json"
+        curl -fL --retry 5 --retry-all-errors -O "$base/genesis.json"
         mkdir -p genesis
         mv -f genesis.json genesis/genesis.json
 
-        # Show archive contents for debugging
         echo "Listing archive contents:"
         tar -tzf "$tgz" | sed -n '1,200p'
 
-        # Extract
         tar -xzf "$tgz"
 
-        # Locate the server binary (handle both name + subfolder cases)
-        BIN_CANDIDATE=""
-        for name in zksync_os_bin zksync-os-server; do
-          # exact match in cwd
-          if [[ -f "$name" ]]; then BIN_CANDIDATE="$name"; break; fi
-          # within one subdir (common packaging)
-          found="$(find . -maxdepth 2 -type f -name "$name" | head -n1 || true)"
-          if [[ -n "$found" ]]; then BIN_CANDIDATE="$found"; break; fi
-        done
-
-        if [[ -z "$BIN_CANDIDATE" ]]; then
-          echo "ERROR: Could not find server binary in archive."
-          echo "Top-level tree:"
-          ls -la
-          echo "Recursive tree (depth 2):"
+        if [[ ! -f ./zksync-os-server ]]; then
+          echo "ERROR: expected ./zksync-os-server in the archive but didn't find it."
           find . -maxdepth 2 -type f -print
           exit 1
         fi
 
-        echo "Found server binary at: $BIN_CANDIDATE"
-        chmod +x "$BIN_CANDIDATE"
-        # Normalize to a known path for later steps
-        mv "$BIN_CANDIDATE" ./zksync_os_bin
+        chmod +x ./zksync-os-server
+        echo "Binary ready: ./zksync-os-server"
 
-    - name: Start Anvil (L1) and wait
+    - name: Start Anvil (L1)
       shell: bash
       run: |
         set -euo pipefail
         cd .zks
-        nohup anvil --load-state zkos-l1-state.json --port ${{ inputs.l1_port }} > anvil.log 2>&1 &
+        echo "Launching anvil fully detached on :${{ inputs.l1_port }}..."
+        nohup anvil --load-state zkos-l1-state.json --port ${{ inputs.l1_port }} > anvil.log 2>&1 < /dev/null &
         echo $! > anvil.pid
-        for i in $(seq 1 60); do
-          # short, bounded curl (no hang)
-          reply="$(curl -fsS --connect-timeout 1 --max-time 2 -X POST "http://127.0.0.1:${{ inputs.l1_port }}" \
-            -H 'content-type: application/json' \
-            --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}')" || true
-          if printf '%s' "$reply" | grep -q '"jsonrpc":"2.0"'; then
-            echo "Anvil ready"
-            break
-          fi
-          # process died?
-          if ! kill -0 "$(cat anvil.pid)" 2>/dev/null; then
-            echo "Anvil died during wait. Last logs:"; tail -n 200 anvil.log || true
-            exit 1
-          fi
-          sleep 1
-          if [ "$i" = "60" ]; then
-            echo "Anvil not ready after $i s"; tail -n 200 anvil.log || true; exit 1
-          fi
-        done
-        # fully detach for safety
+        sleep "${{ inputs.boot_grace_seconds }}"
+        if ! kill -0 "$(cat anvil.pid)" 2>/dev/null; then
+          echo "Anvil exited during initial grace. Dumping anvil.log:"
+          sed -n '1,200p' anvil.log || true
+          exit 1
+        fi
         disown || true
+        echo "Anvil launched (pid: $(cat anvil.pid))."
 
-    - name: Start ZKsync OS server (L2) — no-wait
+    - name: Start ZKsync OS server (L2)
       shell: bash
       run: |
         set -euo pipefail
         cd .zks
-
-        # Env for the server
         export L1_RPC="http://127.0.0.1:${{ inputs.l1_port }}"
         export GENESIS="$(pwd)/genesis/genesis.json"
         export PORT="${{ inputs.l2_port }}"
         export RUST_LOG=info
 
-        echo "Launching zksync_os_bin fully detached..."
-        # Start in a brand-new session, with stdin closed and logs going to l2.log
-        setsid bash -c 'exec ./zksync_os_bin </dev/null >>l2.log 2>&1' &
+        echo "Launching zksync-os-server fully detached on :${{ inputs.l2_port }}..."
+        setsid bash -c 'exec ./zksync-os-server </dev/null >>l2.log 2>&1' &
         echo $! > l2.pid
-
-        # Give it a moment to bind the port
-        sleep 3
-
-        # If it died instantly, fail with logs for visibility
+        sleep "${{ inputs.boot_grace_seconds }}"
         if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
-          echo "zksync_os_bin exited during initial 3s grace. Dumping l2.log:"
+          echo "zksync-os-server exited during initial grace. Dumping l2.log:"
           sed -n '1,200p' l2.log || true
           exit 1
         fi
-
-        # Explicitly detach from the job table so the step can finish no matter what
         disown || true
-
-        echo "ZKsync OS launched (pid: $(cat l2.pid)). Continuing…"
+        echo "ZKsync OS launched (pid: $(cat l2.pid))."
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
