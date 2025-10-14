@@ -162,53 +162,68 @@ runs:
         echo "==> ZKsync OS binary info"
         chmod +x ./zksync_os_bin || true
         ./zksync_os_bin --version || true
-        ./zksync_os_bin --help | sed -n '1,120p' || true
+        ./zksync_os_bin --help | sed -n '1,60p' || true
 
         echo "==> Launching ZKsync OS"
-        # Best-guess envs (ignored if unsupported)
         export L1_RPC="http://127.0.0.1:${{ inputs.l1_port }}"
         export GENESIS="$(pwd)/genesis/genesis.json"
         export PORT="${{ inputs.l2_port }}"
         export RUST_LOG=info
 
-        # Start and record PID
         nohup ./zksync_os_bin > l2.log 2>&1 &
         echo $! > l2.pid
         sleep 1
 
         if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
-          echo "ZKsync OS server exited immediately. Dumping l2.log:"
-          sed -n '1,400p' l2.log || true
+          echo "ZKsync OS exited immediately. Dumping l2.log:"; sed -n '1,200p' l2.log || true
           exit 1
         fi
 
-        echo "==> Checking listening sockets (helps discover actual port)"
-        (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) || true
-
-        echo "==> Waiting for JSON-RPC on :${{ inputs.l2_port }}"
+        echo "==> Waiting for L2 TCP on :${{ inputs.l2_port }}"
         for i in $(seq 1 ${{ inputs.wait_seconds }}); do
-          # If process died during wait, show logs and fail fast.
-          if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
-            echo "ZKsync OS server died during startup. Dumping l2.log:"
-            tail -n 400 l2.log || true
-            exit 1
+          if (exec 3<>/dev/tcp/127.0.0.1/${{ inputs.l2_port }}) 2>/dev/null; then
+            exec 3>&-  # close
+            break
           fi
-
-          if curl -sS -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
-              -H 'content-type: application/json' \
-              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' | grep -q '"result"'; then
-            echo "L2 JSON-RPC ready on port ${{ inputs.l2_port }}"
-            exit 0
+          # died while waiting?
+          if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
+            echo "L2 died during TCP wait. Last logs:"; tail -n 200 l2.log || true; exit 1
           fi
           sleep 1
+          if [ "$i" = "${{ inputs.wait_seconds }}" ]; then
+            echo "TCP not open after $i s"; tail -n 200 l2.log || true; exit 1
+          fi
         done
 
-        echo "L2 JSON-RPC not ready on port ${{ inputs.l2_port }}; dumping last 400 lines of l2.log:"
-        tail -n 400 l2.log || true
-        echo "Active listeners (to discover actual port, if any):"
-        (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) || true
-        exit 1
+        echo "==> Waiting for JSON-RPC on :${{ inputs.l2_port }}"
+        first_reply=""
+        for i in $(seq 1 ${{ inputs.wait_seconds }}); do
+          if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
+            echo "L2 died during RPC wait. Last logs:"; tail -n 200 l2.log || true; exit 1
+          fi
 
+          reply="$(curl -fsS --connect-timeout 1 --max-time 2 -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
+            -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
+
+          # Record first non-empty reply for debugging
+          if [ -z "${first_reply}" ] && [ -n "${reply}" ]; then
+            first_reply="${reply}"
+          fi
+
+          # Consider ready if it looks like *any* JSON-RPC response (result OR error)
+          if echo "${reply}" | grep -q '"jsonrpc"\s*:\s*"2\.0"'; then
+            echo "L2 JSON-RPC is responding"; break
+          fi
+
+          sleep 1
+          if [ "$i" = "${{ inputs.wait_seconds }}" ]; then
+            echo "L2 JSON-RPC not ready after $i s"
+            echo "First non-empty reply: ${first_reply}"
+            tail -n 200 l2.log || true
+            exit 1
+          fi
+        done
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
