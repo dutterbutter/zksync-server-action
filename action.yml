@@ -103,8 +103,36 @@ runs:
         curl -sSL -O "$base/zkos-l1-state.json"
         curl -sSL -O "$base/genesis.json"
 
+        # Show archive contents for debugging
+        echo "Listing archive contents:"
+        tar -tzf "$tgz" | sed -n '1,200p'
+
+        # Extract
         tar -xzf "$tgz"
-        chmod +x zksync_os_bin
+
+        # Locate the server binary (handle both name + subfolder cases)
+        BIN_CANDIDATE=""
+        for name in zksync_os_bin zksync-os-server; do
+          # exact match in cwd
+          if [[ -f "$name" ]]; then BIN_CANDIDATE="$name"; break; fi
+          # within one subdir (common packaging)
+          found="$(find . -maxdepth 2 -type f -name "$name" | head -n1 || true)"
+          if [[ -n "$found" ]]; then BIN_CANDIDATE="$found"; break; fi
+        done
+
+        if [[ -z "$BIN_CANDIDATE" ]]; then
+          echo "ERROR: Could not find server binary in archive."
+          echo "Top-level tree:"
+          ls -la
+          echo "Recursive tree (depth 2):"
+          find . -maxdepth 2 -type f -print
+          exit 1
+        fi
+
+        echo "Found server binary at: $BIN_CANDIDATE"
+        chmod +x "$BIN_CANDIDATE"
+        # Normalize to a known path for later steps
+        mv "$BIN_CANDIDATE" ./zksync_os_bin
 
     - name: Start Anvil (L1) and wait
       shell: bash
