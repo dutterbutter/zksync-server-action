@@ -176,38 +176,55 @@ runs:
         ./zksync_os_bin --version || true
         ./zksync_os_bin --help | sed -n '1,60p' || true
 
-        echo "==> Launching ZKsync OS"
+        echo "==> Launching ZKsync OS (fully detached)"
         export L1_RPC="http://127.0.0.1:${{ inputs.l1_port }}"
         export GENESIS="$(pwd)/genesis/genesis.json"
         export PORT="${{ inputs.l2_port }}"
         export RUST_LOG=info
 
-        nohup ./zksync_os_bin > l2.log 2>&1 &
+        # Fully detach: new session + no inherited stdio
+        setsid bash -c 'exec ./zksync_os_bin </dev/null >>l2.log 2>&1' &
         echo $! > l2.pid
         sleep 1
+
         if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
           echo "ZKsync OS exited immediately. Dumping l2.log:"; sed -n '1,200p' l2.log || true
           exit 1
         fi
 
-        echo "==> Waiting for JSON-RPC (eth_chainId) on :${{ inputs.l2_port }}"
-        first_reply=""
+        echo "==> Probing listeners (ss) while waiting for readiness on :${{ inputs.l2_port }}"
         for i in $(seq 1 ${{ inputs.wait_seconds }}); do
+          # show listeners once per second for visibility
+          (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) | sed -n '1,5p' || true
+
+          # if process died, fail fast with logs
           if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
-            echo "L2 died during RPC wait. Last logs:"; tail -n 200 l2.log || true; exit 1
+            echo "L2 died during wait. Last logs:"; tail -n 200 l2.log || true
+            exit 1
           fi
 
-          reply="$(curl -fsS --connect-timeout 1 --max-time 2 -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
-            -H 'content-type: application/json' \
-            --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
+          # 1) TCP open?
+          if ! (command -v nc >/dev/null && nc -z 127.0.0.1 "${{ inputs.l2_port }}" || \
+                (exec 3<>/dev/tcp/127.0.0.1/${{ inputs.l2_port }} 2>/dev/null && exec 3>&- 3<&-)); then
+            sleep 1; continue
+          fi
 
-          [ -z "$first_reply" ] && [ -n "$reply" ] && first_reply="$reply"
+          # 2) Status server (it’s in your logs at 0.0.0.0:3071); health often comes up first
+          health="$(curl -fsS --connect-timeout 1 --max-time 2 http://127.0.0.1:3071/health || true)"
+          [ -n "$health" ] && echo "Status /health: $health" || echo "Status /health: (no reply yet)"
 
-          # Ready if it looks like JSON-RPC (result OR error)
-          if printf '%s' "$reply" | grep -q '"jsonrpc":"2.0"'; then
-            if printf '%s' "$reply" | grep -q '"result"'; then
-              cid="$(printf "%s" "$reply" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-              [ -n "${cid}" ] && echo "eth_chainId: ${cid}"
+          # 3) RPC: accept any JSON-RPC envelope as alive (result OR error)
+          rpc="$(curl -fsS --http1.1 --connect-timeout 1 --max-time 3 \
+                  -H 'content-type: application/json' \
+                  -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
+                  --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
+
+          if printf '%s' "$rpc" | grep -q '"jsonrpc"[[:space:]]*:[[:space:]]*"2\.0"'; then
+            if printf '%s' "$rpc" | grep -q '"result"'; then
+              cid="$(printf "%s" "$rpc" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+              [ -n "$cid" ] && echo "eth_chainId: $cid"
+            else
+              echo "RPC responded (error envelope), treating as ready"
             fi
             echo "L2 JSON-RPC is responding"
             break
@@ -215,14 +232,19 @@ runs:
 
           sleep 1
           if [ "$i" = "${{ inputs.wait_seconds }}" ]; then
-            echo "L2 JSON-RPC not ready after $i s"
-            echo "First non-empty reply: ${first_reply}"
+            echo "L2 not ready after $i s — diagnostics:"
+            echo ">>> ss -ltnp (top 50)"
+            (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) | sed -n '1,50p' || true
+            echo ">>> one-shot CURL -v to RPC"
+            curl -v --http1.1 --connect-timeout 2 --max-time 4 -H 'content-type: application/json' \
+              -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
+              --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' || true
+            echo ">>> tail l2.log (last 200)"
             tail -n 200 l2.log || true
             exit 1
           fi
         done
-        # fully detach for safety
-        disown || true
+
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
