@@ -54,8 +54,8 @@ runs:
           const owner = 'matter-labs';
           const repo  = 'zksync-os-server';
 
-          const version = (process.env.VERSION || 'latest').trim();
-          const includePre = (process.env.INCLUDE_PRE || 'false').toLowerCase() === 'true';
+          const version = core.getInput('version')?.trim() || 'latest';
+          const includePre = (core.getInput('include_prerelease') || 'false').toLowerCase() === 'true';
 
           let tag = version;
 
@@ -66,7 +66,7 @@ runs:
 
           async function latestIncludingPrerelease() {
             const releases = await github.paginate(github.rest.repos.listReleases, {
-              owner, repo, per_page: 10,
+              owner, repo, per_page: 20,
             });
             const rel = releases.find(r => !r.draft); // first is newest
             if (!rel) throw new Error(`No releases found for ${owner}/${repo}`);
@@ -83,6 +83,7 @@ runs:
           } catch (err) {
             core.setFailed(`Failed to resolve release tag for ${owner}/${repo}: ${err.message || err}`);
           }
+
 
     - name: Download release assets
       shell: bash
@@ -179,8 +180,8 @@ runs:
         export PORT="${{ inputs.l2_port }}"
         export RUST_LOG=info
 
-        # Fully detach: new session + no inherited stdio
-        setsid bash -c 'exec ./zksync_os_bin </dev/null >>l2.log 2>&1' &
+        # fully detached: stdin closed; logs to l2.log
+        nohup ./zksync_os_bin > l2.log 2>&1 < /dev/null &
         echo $! > l2.pid
         sleep 1
 
@@ -189,43 +190,35 @@ runs:
           exit 1
         fi
 
-        echo "==> Waiting for JSON-RPC on :${{ inputs.l2_port }} (auto-probe, max 120s)"
+        echo "==> Waiting for JSON-RPC on :${{ inputs.l2_port }} (cURL probe, max 120s)"
         DEADLINE=$(( $(date +%s) + 120 ))
 
         while :; do
-          # if process died, fail fast with logs
+          # fail fast if process died
           if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
             echo "L2 died during wait. Last logs:"; tail -n 200 l2.log || true
             exit 1
           fi
 
-          # 1) TCP open?
-          if (command -v nc >/dev/null && nc -z 127.0.0.1 "${{ inputs.l2_port }}") || \
-            (exec 3<>/dev/tcp/127.0.0.1/${{ inputs.l2_port }} 2>/dev/null && exec 3>&- 3<&-); then
+          # Single bounded probe (never blocks more than ~3s)
+          rpc="$(curl -fsS --http1.1 --connect-timeout 1 --max-time 3 \
+                  -H 'content-type: application/json' \
+                  -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
+                  --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
 
-            # 2) RPC: accept any JSON-RPC envelope as alive (result OR error)
-            rpc="$(curl -fsS --http1.1 --connect-timeout 1 --max-time 3 \
-                    -H 'content-type: application/json' \
-                    -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
-                    --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
-
-            if printf '%s' "$rpc" | grep -q '"jsonrpc"[[:space:]]*:[[:space:]]*"2\.0"'; then
-              if printf '%s' "$rpc" | grep -q '"result"'; then
-                cid="$(printf "%s" "$rpc" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-                [ -n "$cid" ] && echo "eth_chainId: $cid"
-              else
-                echo "RPC responded (error envelope), treating as ready"
-              fi
-              echo "L2 JSON-RPC is responding — proceeding"
-              break
+          if printf '%s\n' "$rpc" | grep -q '"jsonrpc"[[:space:]]*:[[:space:]]*"2\.0"'; then
+            if printf '%s\n' "$rpc" | grep -q '"result"'; then
+              cid="$(printf "%s" "$rpc" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+              [ -n "$cid" ] && echo "eth_chainId: $cid"
+            else
+              echo "RPC responded (error envelope), treating as ready"
             fi
+            echo "L2 JSON-RPC is responding — proceeding"
+            break
           fi
 
-          # hard deadline
           if [ "$(date +%s)" -ge "$DEADLINE" ]; then
             echo "L2 not ready within 120s — diagnostics:"
-            echo ">>> ss -ltnp (top 50)"
-            (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) | sed -n '1,50p' || true
             echo ">>> one-shot CURL -v to RPC"
             curl -v --http1.1 --connect-timeout 2 --max-time 4 -H 'content-type: application/json' \
               -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
@@ -237,9 +230,6 @@ runs:
 
           sleep 1
         done
-
-        # fully detach from the shell so the step can end cleanly
-        disown || true
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
