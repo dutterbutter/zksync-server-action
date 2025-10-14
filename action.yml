@@ -21,9 +21,6 @@ inputs:
   linux_arch:
     description: "Linux arch (x86_64 or aarch64)"
     default: "x86_64"
-  wait_seconds:
-    description: "Seconds to wait for L2 readiness"
-    default: "300"
   set_env:
     description: "If 'true', export ETH_RPC and ZKSYNC_RPC to GITHUB_ENV"
     default: "true"
@@ -165,7 +162,7 @@ runs:
         # fully detach for safety
         disown || true
 
-    - name: Start ZKsync OS server (L2) and wait
+    - name: Start ZKsync OS server (L2) and wait-until-ready (auto)
       shell: bash
       run: |
         set -euo pipefail
@@ -192,11 +189,10 @@ runs:
           exit 1
         fi
 
-        echo "==> Probing listeners (ss) while waiting for readiness on :${{ inputs.l2_port }}"
-        for i in $(seq 1 ${{ inputs.wait_seconds }}); do
-          # show listeners once per second for visibility
-          (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) | sed -n '1,5p' || true
+        echo "==> Waiting for JSON-RPC on :${{ inputs.l2_port }} (auto-probe, max 120s)"
+        DEADLINE=$(( $(date +%s) + 120 ))
 
+        while :; do
           # if process died, fail fast with logs
           if ! kill -0 "$(cat l2.pid)" 2>/dev/null; then
             echo "L2 died during wait. Last logs:"; tail -n 200 l2.log || true
@@ -204,35 +200,30 @@ runs:
           fi
 
           # 1) TCP open?
-          if ! (command -v nc >/dev/null && nc -z 127.0.0.1 "${{ inputs.l2_port }}" || \
-                (exec 3<>/dev/tcp/127.0.0.1/${{ inputs.l2_port }} 2>/dev/null && exec 3>&- 3<&-)); then
-            sleep 1; continue
-          fi
+          if (command -v nc >/dev/null && nc -z 127.0.0.1 "${{ inputs.l2_port }}") || \
+            (exec 3<>/dev/tcp/127.0.0.1/${{ inputs.l2_port }} 2>/dev/null && exec 3>&- 3<&-); then
 
-          # 2) Status server (it’s in your logs at 0.0.0.0:3071); health often comes up first
-          health="$(curl -fsS --connect-timeout 1 --max-time 2 http://127.0.0.1:3071/health || true)"
-          [ -n "$health" ] && echo "Status /health: $health" || echo "Status /health: (no reply yet)"
+            # 2) RPC: accept any JSON-RPC envelope as alive (result OR error)
+            rpc="$(curl -fsS --http1.1 --connect-timeout 1 --max-time 3 \
+                    -H 'content-type: application/json' \
+                    -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
+                    --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
 
-          # 3) RPC: accept any JSON-RPC envelope as alive (result OR error)
-          rpc="$(curl -fsS --http1.1 --connect-timeout 1 --max-time 3 \
-                  -H 'content-type: application/json' \
-                  -X POST "http://127.0.0.1:${{ inputs.l2_port }}" \
-                  --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}')" || true
-
-          if printf '%s' "$rpc" | grep -q '"jsonrpc"[[:space:]]*:[[:space:]]*"2\.0"'; then
-            if printf '%s' "$rpc" | grep -q '"result"'; then
-              cid="$(printf "%s" "$rpc" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-              [ -n "$cid" ] && echo "eth_chainId: $cid"
-            else
-              echo "RPC responded (error envelope), treating as ready"
+            if printf '%s' "$rpc" | grep -q '"jsonrpc"[[:space:]]*:[[:space:]]*"2\.0"'; then
+              if printf '%s' "$rpc" | grep -q '"result"'; then
+                cid="$(printf "%s" "$rpc" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+                [ -n "$cid" ] && echo "eth_chainId: $cid"
+              else
+                echo "RPC responded (error envelope), treating as ready"
+              fi
+              echo "L2 JSON-RPC is responding — proceeding"
+              break
             fi
-            echo "L2 JSON-RPC is responding"
-            break
           fi
 
-          sleep 1
-          if [ "$i" = "${{ inputs.wait_seconds }}" ]; then
-            echo "L2 not ready after $i s — diagnostics:"
+          # hard deadline
+          if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+            echo "L2 not ready within 120s — diagnostics:"
             echo ">>> ss -ltnp (top 50)"
             (command -v ss >/dev/null && ss -ltnp || lsof -iTCP -sTCP:LISTEN -P) | sed -n '1,50p' || true
             echo ">>> one-shot CURL -v to RPC"
@@ -243,8 +234,12 @@ runs:
             tail -n 200 l2.log || true
             exit 1
           fi
+
+          sleep 1
         done
 
+        # fully detach from the shell so the step can end cleanly
+        disown || true
 
     - name: Export RPC URLs
       if: ${{ inputs.set_env == 'true' }}
