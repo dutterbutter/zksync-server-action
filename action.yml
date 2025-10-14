@@ -12,9 +12,6 @@ inputs:
   include_prerelease:
     description: "Allow pre-releases when version is 'latest'"
     default: "false"
-  repo:
-    description: "Owner/repo for releases"
-    default: "matter-labs/zksync-os-server"
   l1_port:
     description: "L1 (Anvil) RPC port"
     default: "8545"
@@ -57,9 +54,11 @@ runs:
       with:
         github-token: ${{ github.token }}
         script: |
-          const repo = core.getInput('repo', { required: true });
-          const version = (core.getInput('version') || 'latest').trim();
-          const includePre = (core.getInput('include_prerelease') || 'false').toLowerCase() === 'true';
+          const owner = 'matter-labs';
+          const repo  = 'zksync-os-server';
+
+          const version = (process.env.VERSION || 'latest').trim();
+          const includePre = (process.env.INCLUDE_PRE || 'false').toLowerCase() === 'true';
 
           let tag = version;
           if (version === 'latest') {

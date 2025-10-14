@@ -51,7 +51,6 @@ Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and
 | -------------------- | ------------------------------ | --------------------------------------------------- |
 | `version`            | `latest`                       | Release tag (e.g. `v0.8.2`) or `latest`             |
 | `include_prerelease` | `false`                        | If `true` and `version=latest`, allows pre-releases |
-| `repo`               | `matter-labs/zksync-os-server` | Source repo for releases                            |
 | `l1_port`            | `8545`                         | L1 RPC port (Anvil)                                 |
 | `l2_port`            | `3050`                         | L2 RPC port (zksync_os_bin)                         |
 | `linux_arch`         | `x86_64`                       | Architecture for binary (`x86_64` or `aarch64`)     |
