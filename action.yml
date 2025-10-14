@@ -61,27 +61,31 @@ runs:
           const includePre = (process.env.INCLUDE_PRE || 'false').toLowerCase() === 'true';
 
           let tag = version;
-          if (version === 'latest') {
-            if (includePre) {
-              const releases = await github.paginate(github.rest.repos.listReleases, {
-                owner: repo.split('/')[0],
-                repo: repo.split('/')[1],
-                per_page: 10,
-              });
-              const rel = releases.find(r => !r.draft);
-              if (!rel) core.setFailed(`No releases found for ${repo}`);
-              tag = rel.tag_name;
-            } else {
-              const res = await github.rest.repos.getLatestRelease({
-                owner: repo.split('/')[0],
-                repo: repo.split('/')[1],
-              });
-              tag = res.data.tag_name;
-            }
+
+          async function latestStable() {
+            const res = await github.rest.repos.getLatestRelease({ owner, repo });
+            return res.data.tag_name;
           }
 
-          core.setOutput('tag', tag);
-          core.setOutput('base', `https://github.com/${repo}/releases/download/${tag}`);
+          async function latestIncludingPrerelease() {
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 10,
+            });
+            const rel = releases.find(r => !r.draft); // first is newest
+            if (!rel) throw new Error(`No releases found for ${owner}/${repo}`);
+            return rel.tag_name;
+          }
+
+          try {
+            if (version === 'latest') {
+              tag = includePre ? await latestIncludingPrerelease() : await latestStable();
+            }
+            core.info(`Resolved zksync-os-server tag: ${tag}`);
+            core.setOutput('tag', tag);
+            core.setOutput('base', `https://github.com/${owner}/${repo}/releases/download/${tag}`);
+          } catch (err) {
+            core.setFailed(`Failed to resolve release tag for ${owner}/${repo}: ${err.message || err}`);
+          }
 
     - name: Download release assets
       shell: bash
