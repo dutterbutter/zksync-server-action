@@ -1,5 +1,5 @@
 name: "ZKsync Server Action (L1 + L2)"
-description: "Starts anvil (L1) and zksync_os_server (L2) for L1-L2 testing"
+description: "Starts Anvil (L1) and ZKsync OS server (L2) for L1-L2 testing"
 author: "dutterbutter"
 branding:
   icon: "server"

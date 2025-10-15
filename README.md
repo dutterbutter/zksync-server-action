@@ -1,6 +1,6 @@
 # ZKsync Server Action (L1 + L2)
 
-Start a local **L1 (Anvil)** and **L2 (zksync_os_bin)** stack directly from official [`matter-labs/zksync-os-server`](https://github.com/matter-labs/zksync-os-server) release assets.
+Start a local **L1 (Anvil)** and **L2 (zksync_os_server)** directly from official [`matter-labs/zksync-os-server`](https://github.com/matter-labs/zksync-os-server) release assets.
 
 Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and cross-chain flows.
 
@@ -12,6 +12,20 @@ Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and
 
 ## Quick Start
 
+## Requirements
+
+* **Runner:** `ubuntu-latest` (Anvil requires Linux)
+* **Foundry:** must be available (to provide `anvil` binary)
+
+Example setup:
+
+```yaml
+- name: Setup Foundry
+  uses: foundry-rs/foundry-toolchain@v1
+  with:
+    version: v1.4.1
+```
+
 ### **Minimal usage (latest stable)**
 
 ```yaml
@@ -19,7 +33,7 @@ Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and
   uses: dutterbutter/zksync-server-action@v0.1.0
   with:
     version: latest
-````
+```
 
 ### **Pinned version**
 
@@ -49,9 +63,8 @@ Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and
 | `version`            | `latest`                       | Release tag (e.g. `v0.8.2`) or `latest`             |
 | `include_prerelease` | `false`                        | If `true` and `version=latest`, allows pre-releases |
 | `l1_port`            | `8545`                         | L1 RPC port (Anvil)                                 |
-| `l2_port`            | `3050`                         | L2 RPC port (zksync_os_bin)                         |
+| `l2_port`            | `3050`                         | L2 RPC port (zksync_os_server)                         |
 | `linux_arch`         | `x86_64`                       | Architecture for binary (`x86_64` or `aarch64`)     |
-| `wait_seconds`       | `300`                          | Max seconds to wait for L2 to be ready              |
 | `set_env`            | `true`                         | Export `ETH_RPC` and `ZKSYNC_RPC` to `GITHUB_ENV`   |
 
 ## Outputs
@@ -61,20 +74,6 @@ Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and
 | `l1_rpc_url`       | Local L1 RPC URL                    |
 | `l2_rpc_url`       | Local L2 RPC URL                    |
 | `resolved_version` | Actual tag resolved (e.g. `v0.8.2`) |
-
-## Requirements
-
-* **Runner:** `ubuntu-latest` (Anvil requires Linux)
-* **Foundry:** must be available (to provide `anvil` binary)
-
-Example setup:
-
-```yaml
-- name: Setup Foundry
-  uses: foundry-rs/foundry-toolchain@v1
-  with:
-    version: v1.3.4
-```
 
 ## Environment Variables
 
