@@ -2,8 +2,6 @@
 
 Start a local **L1 (Anvil)** and **L2 (zksync_os_server)** directly from official [`matter-labs/zksync-os-server`](https://github.com/matter-labs/zksync-os-server) release assets.
 
-Perfect for **SDK integration** or **E2E testing** of deposits, withdrawals, and cross-chain flows.
-
 ## Features
 
 - Downloads official binaries + state (`genesis.json`, `zkos-l1-state.json`)
