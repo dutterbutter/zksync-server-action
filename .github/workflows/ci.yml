@@ -19,7 +19,6 @@ jobs:
         uses: ./
         with:
           version: latest
-          wait_seconds: 300
 
       - name: Verify RPCs respond
         run: |

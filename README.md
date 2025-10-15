@@ -91,7 +91,8 @@ ZKSYNC_RPC=http://127.0.0.1:3050
 
   * `.zks/anvil.log` — Anvil output
   * `.zks/l2.log` — zksync_os_bin output
-    Upload them on failure for debugging:
+
+Upload them on failure for debugging:
 
   ```yaml
   - name: Upload logs
@@ -104,7 +105,7 @@ ZKSYNC_RPC=http://127.0.0.1:3050
 
 ### Support
 
-If you encounter issues not covered in the troubleshooting section, feel free to [open an issue](https://github.com/dutterbutter/anvil-zksync-action/issues) in the repository.
+If you encounter issues not covered in the troubleshooting section, feel free to [open an issue](https://github.com/dutterbutter/zksync-server-action/issues) in the repository.
 
 ## Contributing 🤝
 
