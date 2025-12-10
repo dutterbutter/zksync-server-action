@@ -10,7 +10,7 @@ Start a local **L1 (Anvil)** and **L2 (zksync_os_server)** directly from officia
 
 ## Quick Start
 
-## Requirements
+### Requirements
 
 * **Runner:** `ubuntu-latest` (Anvil requires Linux)
 * **Foundry:** must be available (to provide `anvil` binary)
@@ -64,6 +64,8 @@ Example setup:
 | `l2_port`            | `3050`                         | L2 RPC port (zksync_os_server)                         |
 | `linux_arch`         | `x86_64`                       | Architecture for binary (`x86_64` or `aarch64`)     |
 | `set_env`            | `true`                         | Export `ETH_RPC` and `ZKSYNC_RPC` to `GITHUB_ENV`   |
+| `anvil_logs`         | `false`                        | Print Anvil log (`.zks/anvil.log`) at the end       |
+| `zksync_logs`        | `false`                        | Print zksync-os-server log (`.zks/zksyncos.log`) at the end |
 
 ## Outputs
 
@@ -72,6 +74,8 @@ Example setup:
 | `l1_rpc_url`       | Local L1 RPC URL                    |
 | `l2_rpc_url`       | Local L2 RPC URL                    |
 | `resolved_version` | Actual tag resolved (e.g. `v0.8.2`) |
+| `anvil_log_path`   | Path to Anvil log (`.zks/anvil.log`) |
+| `zksync_log_path`  | Path to zksync-os-server log (`.zks/zksyncos.log`) |
 
 ## Environment Variables
 
@@ -88,7 +92,7 @@ ZKSYNC_RPC=http://127.0.0.1:3050
 * **Logs:**
 
   * `.zks/anvil.log` — Anvil output
-  * `.zks/l2.log` — zksync_os_bin output
+  * `.zks/zksyncos.log` — zksync-os-server output
 
 Upload them on failure for debugging:
 
@@ -100,6 +104,31 @@ Upload them on failure for debugging:
       name: zks-logs
       path: .zks/*.log
   ```
+
+You have two ways to view logs:
+
+* Inline: set `anvil_logs: true` / `zksync_logs: true` and the action will print them in the job output.
+* Manual: skip the inputs and use the exposed output paths to `cat` (or upload) the files yourself.
+
+Example with both inline printing and manual access to the paths:
+
+```yaml
+- name: Run ZKsync OS
+  id: zks
+  uses: dutterbutter/zksync-server-action@v0.1.0
+  with:
+    version: latest
+    anvil_logs: true
+    zksync_logs: true
+
+- name: Print Anvil log
+  if: always()
+  run: cat ${{ steps.zks.outputs.anvil_log_path }}
+
+- name: Print server log
+  if: always()
+  run: cat ${{ steps.zks.outputs.zksync_log_path }}
+```
 
 ### Support
 
