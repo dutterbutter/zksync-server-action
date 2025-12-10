@@ -27,6 +27,12 @@ inputs:
   boot_grace_seconds:
     description: "Seconds to wait after starting each server before moving on"
     default: "3"
+  anvil_logs:
+    description: "If 'true', print Anvil log at the end"
+    default: "false"
+  zksync_logs:
+    description: "If 'true', print zksync-os-server log at the end"
+    default: "false"
 
 outputs:
   l1_rpc_url:
@@ -38,6 +44,12 @@ outputs:
   resolved_version:
     description: "Resolved tag actually used (e.g. v0.8.2)"
     value: ${{ steps.resolve.outputs.tag }}
+  anvil_log_path:
+    description: "Path to the Anvil log file"
+    value: ${{ steps.vars.outputs.anvil_log }}
+  zksync_log_path:
+    description: "Path to the zksync-os-server log file"
+    value: ${{ steps.vars.outputs.zksync_log }}
 
 runs:
   using: "composite"
@@ -47,6 +59,8 @@ runs:
       run: |
         echo "l1=http://127.0.0.1:${{ inputs.l1_port }}" >> "$GITHUB_OUTPUT"
         echo "l2=http://127.0.0.1:${{ inputs.l2_port }}" >> "$GITHUB_OUTPUT"
+        echo "anvil_log=.zks/anvil.log" >> "$GITHUB_OUTPUT"
+        echo "zksync_log=.zks/l2.log" >> "$GITHUB_OUTPUT"
 
     - id: resolve
       uses: actions/github-script@v7
@@ -170,3 +184,27 @@ runs:
         echo "ETH_RPC=${{ steps.vars.outputs.l1 }}"
         echo "ZKSYNC_RPC=${{ steps.vars.outputs.l2 }}"
         echo "RESOLVED_ZKSYNC_VERSION=${{ steps.resolve.outputs.tag }}"
+
+    - name: Print Anvil log
+      if: ${{ inputs.anvil_logs == 'true' }}
+      shell: bash
+      run: |
+        echo "::group::.zks/anvil.log"
+        if [[ -f "${{ steps.vars.outputs.anvil_log }}" ]]; then
+          cat "${{ steps.vars.outputs.anvil_log }}"
+        else
+          echo "Anvil log not found at ${{ steps.vars.outputs.anvil_log }}"
+        fi
+        echo "::endgroup::"
+
+    - name: Print zksync-os-server log
+      if: ${{ inputs.zksync_logs == 'true' }}
+      shell: bash
+      run: |
+        echo "::group::.zks/l2.log"
+        if [[ -f "${{ steps.vars.outputs.zksync_log }}" ]]; then
+          cat "${{ steps.vars.outputs.zksync_log }}"
+        else
+          echo "zksync-os-server log not found at ${{ steps.vars.outputs.zksync_log }}"
+        fi
+        echo "::endgroup::"
