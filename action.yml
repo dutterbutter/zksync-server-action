@@ -191,6 +191,26 @@ runs:
 
                 test -s "$CONFIG_PATH"
 
+    - name: Debug zksync-os-server config file
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd .zks
+
+        echo "::group::pwd + ls"
+        pwd
+        ls -la
+        echo "::endgroup::"
+
+        echo "::group::config.yaml metadata"
+        ls -la ./config.yaml || true
+        wc -c ./config.yaml || true
+        echo "::endgroup::"
+
+        echo "::group::config.yaml contents"
+        sed -n '1,200p' ./config.yaml || true
+        echo "::endgroup::"
+
     - name: Start ZKsync OS server (L2)
       shell: bash
       run: >
@@ -207,12 +227,20 @@ runs:
 
         export RUST_LOG=info
 
+        CONFIG_ABS="$(pwd)/config.yaml"
 
-        setsid bash -c 'exec ./zksync-os-server --config ./config.yaml
-        </dev/null >>zksyncos.log 2>&1' &
+        echo "::group::launch params"
+        echo "L1_RPC=$L1_RPC"
+        echo "GENESIS=$GENESIS"
+        echo "PORT=$PORT"
+        echo "CONFIG_ABS=$CONFIG_ABS"
+        echo "ls -la CONFIG_ABS:"
+        ls -la "$CONFIG_ABS" || true
+        echo "::endgroup::"
 
+        echo "Launching: ./zksync-os-server --config $CONFIG_ABS"
+        setsid bash -c "exec ./zksync-os-server --config \"$CONFIG_ABS\" </dev/null >>zksyncos.log 2>&1" &
         echo $! > l2.pid
-
 
         sleep "${{ inputs.boot_grace_seconds }}"
 
