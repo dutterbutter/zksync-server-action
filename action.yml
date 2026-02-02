@@ -213,19 +213,15 @@ runs:
 
     - name: Start ZKsync OS server (L2)
       shell: bash
-      run: >
+      run: |
         set -euo pipefail
-
         cd .zks
 
-
         export L1_RPC="http://127.0.0.1:${{ inputs.l1_port }}"
-
         export GENESIS="$(pwd)/genesis/genesis.json"
-
         export PORT="${{ inputs.l2_port }}"
-
         export RUST_LOG=info
+        export RUST_BACKTRACE=1
 
         CONFIG_ABS="$(pwd)/config.yaml"
 
@@ -234,8 +230,10 @@ runs:
         echo "GENESIS=$GENESIS"
         echo "PORT=$PORT"
         echo "CONFIG_ABS=$CONFIG_ABS"
-        echo "ls -la CONFIG_ABS:"
-        ls -la "$CONFIG_ABS" || true
+        echo "binary:"
+        ls -la ./zksync-os-server
+        echo "config:"
+        ls -la "$CONFIG_ABS"
         echo "::endgroup::"
 
         echo "Launching: ./zksync-os-server --config $CONFIG_ABS"
@@ -244,7 +242,23 @@ runs:
 
         sleep "${{ inputs.boot_grace_seconds }}"
 
-        kill -0 "$(cat l2.pid)"
+        PID="$(cat l2.pid)"
+        if ! kill -0 "$PID" 2>/dev/null; then
+          echo "::group::zksync-os-server exited early"
+          echo "PID $PID is not running."
+          echo "Last 200 lines of zksyncos.log:"
+          tail -n 200 zksyncos.log || true
+          echo "::endgroup::"
+
+          echo "::group::try foreground run to capture error"
+          ./zksync-os-server --config "$CONFIG_ABS" || true
+          echo "::endgroup::"
+
+          exit 1
+        fi
+
+        echo "ZKsync OS launched (pid: $PID)."
+
     - name: Export RPC URLs
       if: '${{ inputs.set_env == ''true'' }}'
       shell: bash
