@@ -77,6 +77,76 @@ Example setup:
 | `anvil_log_path`   | Path to Anvil log (`.zks/anvil.log`) |
 | `zksync_log_path`  | Path to zksync-os-server log (`.zks/zksyncos.log`) |
 
+### Configuration inputs
+
+This action **always starts `zksync-os-server` with an explicit config file** (`--config ./config.yaml`).
+
+You may configure the server in one of two ways:
+
+#### Option 1: Provide a full YAML config (recommended)
+
+| Name          | Default  | Description                                                                            |
+| ------------- | -------- | -------------------------------------------------------------------------------------- |
+| `config_yaml` | *(none)* | Full YAML configuration passed verbatim to `zksync-os-server`. Overrides all defaults. |
+
+Example:
+
+```yaml
+- uses: dutterbutter/zksync-server-action@vX
+  with:
+    config_yaml: |
+      genesis:
+        chain_id: 6565
+      l1_sender:
+        operator_commit_sk: ${{ secrets.OPERATOR_COMMIT_SK }}
+        operator_prove_sk:  ${{ secrets.OPERATOR_PROVE_SK }}
+        operator_execute_sk:${{ secrets.OPERATOR_EXECUTE_SK }}
+```
+
+---
+
+#### Option 2: Override individual operator keys
+
+If `config_yaml` is **not** provided, the action will generate a default config and allow selective overrides of the L1 sender operator keys:
+
+| Name                  | Default         | Description                              |
+| --------------------- | --------------- | ---------------------------------------- |
+| `operator_commit_sk`  | *(dev default)* | Override `l1_sender.operator_commit_sk`  |
+| `operator_prove_sk`   | *(dev default)* | Override `l1_sender.operator_prove_sk`   |
+| `operator_execute_sk` | *(dev default)* | Override `l1_sender.operator_execute_sk` |
+
+These are typically passed from GitHub Secrets:
+
+```yaml
+- uses: dutterbutter/zksync-server-action@vX
+  with:
+    operator_commit_sk: ${{ secrets.OPERATOR_COMMIT_SK }}
+    operator_prove_sk:  ${{ secrets.OPERATOR_PROVE_SK }}
+    operator_execute_sk:${{ secrets.OPERATOR_EXECUTE_SK }}
+```
+
+---
+
+### Example configuration file
+
+An example `config.yaml` is included in this repository **for reference only**.
+
+> ⚠️ This file is **not loaded automatically** by the action.
+
+To use it, copy its contents and pass it via the `config_yaml` input.
+
+---
+
+## Outputs
+
+| Name               | Description                                        |
+| ------------------ | -------------------------------------------------- |
+| `l1_rpc_url`       | Local L1 RPC URL                                   |
+| `l2_rpc_url`       | Local L2 RPC URL                                   |
+| `resolved_version` | Actual tag resolved (e.g. `v0.8.2`)                |
+| `anvil_log_path`   | Path to Anvil log (`.zks/anvil.log`)               |
+| `zksync_log_path`  | Path to zksync-os-server log (`.zks/zksyncos.log`) |
+
 ## Environment Variables
 
 If `set_env` is true (default), these are automatically exported:
