@@ -159,9 +159,8 @@ runs:
         CONFIG_PATH="$(pwd)/config.yaml"
 
         if [[ -n "${{ inputs.config_yaml }}" ]]; then
-          cat > "$CONFIG_PATH" <<'YAML'
-          ${{ inputs.config_yaml }}
-          YAML
+          # Avoid heredoc delimiter indentation issues by using printf.
+          printf '%s\n' "${{ inputs.config_yaml }}" > "$CONFIG_PATH"
         else
           COMMIT_SK="${{ inputs.operator_commit_sk }}"
           PROVE_SK="${{ inputs.operator_prove_sk }}"
@@ -188,9 +187,10 @@ runs:
           forced_prices:
             "0x0000000000000000000000000000000000000001": 3000
         YAML
-        fi
+                fi
 
-        test -s "$CONFIG_PATH"
+                test -s "$CONFIG_PATH"
+
     - name: Start ZKsync OS server (L2)
       shell: bash
       run: >
