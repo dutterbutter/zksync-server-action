@@ -169,25 +169,25 @@ runs:
           [[ -n "$EXECUTE_SK" ]] || EXECUTE_SK="0x31f5aa09d23d41bad736cc6e2b4332cf76cdf40c256b5b7cd660a06940ea8629"
 
           cat > "$CONFIG_PATH" <<YAML
-          genesis:
-            bridgehub_address: "0xb9247a375fffc63b3383c75024946fa9c3a8601f"
-            bytecode_supplier_address: "0x194505775af2efaee14fcefe21ab0b271b61f35d"
-            genesis_input_path: "$(pwd)/genesis/genesis.json"
-            chain_id: 6565
+        genesis:
+          bridgehub_address: "0xb9247a375fffc63b3383c75024946fa9c3a8601f"
+          bytecode_supplier_address: "0x194505775af2efaee14fcefe21ab0b271b61f35d"
+          genesis_input_path: "$(pwd)/genesis/genesis.json"
+          chain_id: 6565
 
-          l1_sender:
-            operator_commit_sk: "$COMMIT_SK"
-            operator_prove_sk: "$PROVE_SK"
-            operator_execute_sk: "$EXECUTE_SK"
+        l1_sender:
+          operator_commit_sk: "$COMMIT_SK"
+          operator_prove_sk: "$PROVE_SK"
+          operator_execute_sk: "$EXECUTE_SK"
 
-          external_price_api_client:
-            source: "Forced"
-            forced_prices:
-              "0x0000000000000000000000000000000000000001": 3000
-          YAML
-          fi
+        external_price_api_client:
+          source: "Forced"
+          forced_prices:
+            "0x0000000000000000000000000000000000000001": 3000
+        YAML
+        fi
 
-          test -s "$CONFIG_PATH"
+        test -s "$CONFIG_PATH"
 
     - name: Start ZKsync OS server (L2)
       shell: bash
