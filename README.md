@@ -4,7 +4,9 @@ Start a local **L1 (Anvil)** and **L2 (zksync_os_server)** directly from officia
 
 ## Features
 
-- Downloads official binaries + state (`genesis.json`, `zkos-l1-state.json`)
+- Downloads official binaries + `local-chains.tar.gz`
+- Uses protocol-aware local chains from `./local-chains/<protocol_version>`
+- Falls back to legacy assets for older tags that do not include `local-chains.tar.gz`
 - Boots both **L1 (Anvil)** and **L2 (zksync_os_server)**
 - Exports `ETH_RPC` and `ZKSYNC_RPC` for your subsequent test steps
 
@@ -31,6 +33,7 @@ Example setup:
   uses: dutterbutter/zksync-server-action@v0.1.0
   with:
     version: latest
+    protocol_version: v31.0
 ```
 
 ### **Pinned version**
@@ -61,8 +64,9 @@ Example setup:
 | `version`            | `latest`                       | Release tag (e.g. `v0.8.2`) or `latest`             |
 | `include_prerelease` | `false`                        | If `true` and `version=latest`, allows pre-releases |
 | `l1_port`            | `8545`                         | L1 RPC port (Anvil)                                 |
-| `l2_port`            | `3050`                         | L2 RPC port (zksync_os_server)                         |
+| `l2_port`            | `3050`                         | L2 RPC port (zksync_os_server)                       |
 | `linux_arch`         | `x86_64`                       | Architecture for binary (`x86_64` or `aarch64`)     |
+| `protocol_version`   | `v31.0`                        | Protocol folder under `local-chains` (e.g. `v30.2`, `v31.0`) for `v0.15.0+` |
 | `set_env`            | `true`                         | Export `ETH_RPC` and `ZKSYNC_RPC` to `GITHUB_ENV`   |
 | `anvil_logs`         | `false`                        | Print Anvil log (`.zks/anvil.log`) at the end       |
 | `zksync_logs`        | `false`                        | Print zksync-os-server log (`.zks/zksyncos.log`) at the end |
@@ -79,7 +83,12 @@ Example setup:
 
 ### Configuration inputs
 
-This action **always starts `zksync-os-server` with an explicit config file** (`--config ./config.yaml`).
+From `zksync-os-server` `v0.15.0+`, this action uses `local-chains.tar.gz` and:
+
+- Decompresses `./local-chains/<protocol_version>/l1-state.json.gz` (or `l1.state.json.gz`) for Anvil
+- Starts server with `--config ./local-chains/<protocol_version>/default/config.yaml` (unless overridden)
+
+For tags before `v0.15.0`, it automatically falls back to legacy release assets (`zkos-l1-state.json`, `genesis.json`).
 
 You may configure the server in one of two ways:
 
@@ -107,7 +116,7 @@ Example:
 
 #### Option 2: Override individual operator keys
 
-If `config_yaml` is **not** provided, the action will generate a default config and allow selective overrides of the L1 sender operator keys:
+If `config_yaml` is **not** provided, the action uses the protocol default config from `local-chains` and allows selective overrides of the L1 sender operator keys:
 
 | Name                  | Default         | Description                              |
 | --------------------- | --------------- | ---------------------------------------- |

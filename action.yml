@@ -20,6 +20,9 @@ inputs:
   linux_arch:
     description: Linux arch (x86_64 or aarch64)
     default: x86_64
+  protocol_version:
+    description: Protocol version inside local-chains (e.g. v31.0)
+    default: v31.0
   set_env:
     description: 'If ''true'', export ETH_RPC and ZKSYNC_RPC to GITHUB_ENV'
     default: 'true'
@@ -126,23 +129,62 @@ runs:
         tag="${{ steps.resolve.outputs.tag }}"
         arch="${{ inputs.linux_arch }}"
         tgz="zksync-os-server-${tag}-${arch}-unknown-linux-gnu.tar.gz"
+        local_chains_tgz="local-chains.tar.gz"
 
         curl -fL --retry 5 --retry-all-errors -o "$tgz" "$base/$tgz"
-        curl -fL --retry 5 --retry-all-errors -O "$base/zkos-l1-state.json"
-        curl -fL --retry 5 --retry-all-errors -O "$base/genesis.json"
-
-        mkdir -p genesis
-        mv genesis.json genesis/genesis.json
 
         tar -xzf "$tgz"
         chmod +x ./zksync-os-server
+
+        if curl -fL --retry 5 --retry-all-errors -o "$local_chains_tgz" "$base/$local_chains_tgz"; then
+          tar -xzf "$local_chains_tgz"
+
+          protocol_dir="./local-chains/${{ inputs.protocol_version }}"
+          if [[ ! -d "$protocol_dir" ]]; then
+            echo "Protocol directory '$protocol_dir' was not found in local-chains.tar.gz"
+            echo "Available protocol versions:"
+            ls -1 ./local-chains || true
+            exit 1
+          fi
+        else
+          echo "local-chains.tar.gz not found for $tag; falling back to legacy state assets."
+          curl -fL --retry 5 --retry-all-errors -O "$base/zkos-l1-state.json"
+          curl -fL --retry 5 --retry-all-errors -O "$base/genesis.json"
+
+          mkdir -p genesis
+          mv genesis.json genesis/genesis.json
+        fi
     - name: Start Anvil (L1)
       shell: bash
       run: |
         set -euo pipefail
         cd .zks
 
-        nohup anvil --load-state zkos-l1-state.json \
+        state_json="./zkos-l1-state.json"
+        protocol_dir="./local-chains/${{ inputs.protocol_version }}"
+        if [[ -d "$protocol_dir" ]]; then
+          state_gz="$protocol_dir/l1-state.json.gz"
+
+          if [[ ! -f "$state_gz" ]]; then
+            alt_state_gz="$protocol_dir/l1.state.json.gz"
+            if [[ -f "$alt_state_gz" ]]; then
+              state_gz="$alt_state_gz"
+            else
+              echo "Missing L1 state archive. Expected one of:"
+              echo "  $protocol_dir/l1-state.json.gz"
+              echo "  $protocol_dir/l1.state.json.gz"
+              exit 1
+            fi
+          fi
+
+          gzip -dfk "$state_gz"
+          state_json="${state_gz%.gz}"
+        elif [[ ! -f "$state_json" ]]; then
+          echo "Missing L1 state file. Expected either protocol state under local-chains or $state_json"
+          exit 1
+        fi
+
+        nohup anvil --load-state "$state_json" \
           --port ${{ inputs.l1_port }} \
           > anvil.log 2>&1 < /dev/null &
 
@@ -150,46 +192,80 @@ runs:
         sleep "${{ inputs.boot_grace_seconds }}"
 
         kill -0 "$(cat anvil.pid)"
-    
-    - name: Write zksync-os-server config
+
+    - id: config
+      name: Resolve zksync-os-server config
       shell: bash
       run: |
         set -euo pipefail
         cd .zks
 
-        CONFIG_PATH="$(pwd)/config.yaml"
+        PROTOCOL_CONFIG="$(pwd)/local-chains/${{ inputs.protocol_version }}/default/config.yaml"
 
         if [[ -n "${{ inputs.config_yaml }}" ]]; then
+          CONFIG_PATH="$(pwd)/config.yaml"
           printf '%s\n' "${{ inputs.config_yaml }}" > "$CONFIG_PATH"
         else
-          COMMIT_SK="${{ inputs.operator_commit_sk }}"
-          PROVE_SK="${{ inputs.operator_prove_sk }}"
-          EXECUTE_SK="${{ inputs.operator_execute_sk }}"
+          if [[ -f "$PROTOCOL_CONFIG" ]]; then
+            CONFIG_PATH="$PROTOCOL_CONFIG"
+          else
+            CONFIG_PATH="$(pwd)/config.yaml"
+            printf '%s\n' \
+              'genesis:' \
+              '  bridgehub_address: "0xb9247a375fffc63b3383c75024946fa9c3a8601f"' \
+              '  bytecode_supplier_address: "0x194505775af2efaee14fcefe21ab0b271b61f35d"' \
+              "  genesis_input_path: \"$(pwd)/genesis/genesis.json\"" \
+              '  chain_id: 6565' \
+              '' \
+              'l1_sender:' \
+              '  operator_commit_sk: "0xe9b7176c87e267fdfea1b47f2d340a98692a2d9a32811abc9983d6d46d8745e0"' \
+              '  operator_prove_sk: "0x58a7d54878fe84e74c85e9a333de3abb46203be6d38b6f7a7d72494b5d871f2f"' \
+              '  operator_execute_sk: "0x31f5aa09d23d41bad736cc6e2b4332cf76cdf40c256b5b7cd660a06940ea8629"' \
+              '' \
+              'external_price_api_client:' \
+              '  source: "Forced"' \
+              '  forced_prices:' \
+              '    "0x0000000000000000000000000000000000000001": 3000' \
+              > "$CONFIG_PATH"
+          fi
+        fi
 
-          [[ -n "$COMMIT_SK"  ]] || COMMIT_SK="0xe9b7176c87e267fdfea1b47f2d340a98692a2d9a32811abc9983d6d46d8745e0"
-          [[ -n "$PROVE_SK"   ]] || PROVE_SK="0x58a7d54878fe84e74c85e9a333de3abb46203be6d38b6f7a7d72494b5d871f2f"
-          [[ -n "$EXECUTE_SK" ]] || EXECUTE_SK="0x31f5aa09d23d41bad736cc6e2b4332cf76cdf40c256b5b7cd660a06940ea8629"
+        COMMIT_SK="${{ inputs.operator_commit_sk }}"
+        PROVE_SK="${{ inputs.operator_prove_sk }}"
+        EXECUTE_SK="${{ inputs.operator_execute_sk }}"
 
-          printf '%s\n' \
-            'genesis:' \
-            '  bridgehub_address: "0xb9247a375fffc63b3383c75024946fa9c3a8601f"' \
-            '  bytecode_supplier_address: "0x194505775af2efaee14fcefe21ab0b271b61f35d"' \
-            "  genesis_input_path: \"$(pwd)/genesis/genesis.json\"" \
-            '  chain_id: 6565' \
-            '' \
-            'l1_sender:' \
-            "  operator_commit_sk: \"$COMMIT_SK\"" \
-            "  operator_prove_sk: \"$PROVE_SK\"" \
-            "  operator_execute_sk: \"$EXECUTE_SK\"" \
-            '' \
-            'external_price_api_client:' \
-            '  source: "Forced"' \
-            '  forced_prices:' \
-            '    "0x0000000000000000000000000000000000000001": 3000' \
-            > "$CONFIG_PATH"
+        if [[ -n "$COMMIT_SK" || -n "$PROVE_SK" || -n "$EXECUTE_SK" ]]; then
+          OVERRIDE_CONFIG="$(pwd)/config.override.yaml"
+          cp "$CONFIG_PATH" "$OVERRIDE_CONFIG"
+
+          update_key() {
+            local key="$1"
+            local value="$2"
+
+            if ! grep -Eq "^[[:space:]]*${key}:[[:space:]]*" "$OVERRIDE_CONFIG"; then
+              echo "Could not find key '${key}' in $OVERRIDE_CONFIG"
+              exit 1
+            fi
+
+            sed -E -i.bak "s|^([[:space:]]*${key}:[[:space:]]*).*$|\\1\"${value}\"|" "$OVERRIDE_CONFIG"
+            rm -f "${OVERRIDE_CONFIG}.bak"
+          }
+
+          if [[ -n "$COMMIT_SK" ]]; then
+            update_key "operator_commit_sk" "$COMMIT_SK"
+          fi
+          if [[ -n "$PROVE_SK" ]]; then
+            update_key "operator_prove_sk" "$PROVE_SK"
+          fi
+          if [[ -n "$EXECUTE_SK" ]]; then
+            update_key "operator_execute_sk" "$EXECUTE_SK"
+          fi
+
+          CONFIG_PATH="$OVERRIDE_CONFIG"
         fi
 
         test -s "$CONFIG_PATH"
+        echo "path=$CONFIG_PATH" >> "$GITHUB_OUTPUT"
 
     - name: Start ZKsync OS server (L2)
       shell: bash
@@ -198,12 +274,16 @@ runs:
         cd .zks
 
         export L1_RPC="http://127.0.0.1:${{ inputs.l1_port }}"
-        export GENESIS="$(pwd)/genesis/genesis.json"
+        GENESIS_PATH="$(pwd)/local-chains/${{ inputs.protocol_version }}/genesis/genesis.json"
+        if [[ ! -f "$GENESIS_PATH" ]]; then
+          GENESIS_PATH="$(pwd)/genesis/genesis.json"
+        fi
+        export GENESIS="$GENESIS_PATH"
         export PORT="${{ inputs.l2_port }}"
         export RUST_LOG=info
         export RUST_BACKTRACE=1
 
-        CONFIG_ABS="$(pwd)/config.yaml"
+        CONFIG_ABS="${{ steps.config.outputs.path }}"
 
         echo "Launching: ./zksync-os-server --config $CONFIG_ABS"
         setsid bash -c "exec ./zksync-os-server --config \"$CONFIG_ABS\" </dev/null >>zksyncos.log 2>&1" &
