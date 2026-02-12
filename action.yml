@@ -160,6 +160,15 @@ runs:
         set -euo pipefail
         cd .zks
 
+        if ! command -v anvil >/dev/null 2>&1; then
+          echo "Anvil binary was not found in PATH."
+          echo "Install Foundry before using this action (e.g. foundry-rs/foundry-toolchain@v1)."
+          exit 1
+        fi
+
+        echo "Using anvil: $(command -v anvil)"
+        anvil --version || true
+
         state_json="./zkos-l1-state.json"
         protocol_dir="./local-chains/${{ inputs.protocol_version }}"
         if [[ -d "$protocol_dir" ]]; then
@@ -184,14 +193,25 @@ runs:
           exit 1
         fi
 
-        nohup anvil --load-state "$state_json" \
+        STATE_PATH_ABS="$(realpath "$state_json")"
+        echo "Starting anvil with --load-state $STATE_PATH_ABS"
+
+        nohup anvil --load-state "$STATE_PATH_ABS" \
           --port ${{ inputs.l1_port }} \
           > anvil.log 2>&1 < /dev/null &
 
         echo $! > anvil.pid
         sleep "${{ inputs.boot_grace_seconds }}"
 
-        kill -0 "$(cat anvil.pid)"
+        PID="$(cat anvil.pid)"
+        if ! kill -0 "$PID" 2>/dev/null; then
+          echo "::group::anvil exited early"
+          echo "PID $PID is not running."
+          echo "Last 200 lines of anvil.log:"
+          tail -n 200 anvil.log || true
+          echo "::endgroup::"
+          exit 1
+        fi
 
     - id: config
       name: Resolve zksync-os-server config
