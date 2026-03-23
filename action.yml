@@ -79,9 +79,21 @@ runs:
       shell: bash
       run: |
         echo "l1=http://127.0.0.1:${{ inputs.l1_port }}" >> "$GITHUB_OUTPUT"
-        echo "l2=http://127.0.0.1:${{ inputs.l2_port }}" >> "$GITHUB_OUTPUT"
         echo "anvil_log=.zks/anvil.log" >> "$GITHUB_OUTPUT"
         echo "zksync_log=.zks/zksyncos.log" >> "$GITHUB_OUTPUT"
+        if [[ "${{ inputs.setup }}" == "multi_chain" ]]; then
+          first_url=""
+          while IFS=: read -r chain_id port _rest; do
+            chain_id="${chain_id//[[:space:]]/}"
+            port="${port//[[:space:]]/}"
+            [[ -z "$chain_id" || "$chain_id" == \#* ]] && continue
+            echo "l2_${chain_id}=http://127.0.0.1:${port}" >> "$GITHUB_OUTPUT"
+            [[ -z "$first_url" ]] && first_url="http://127.0.0.1:${port}"
+          done <<< "${{ inputs.l2_ports }}"
+          echo "l2=${first_url}" >> "$GITHUB_OUTPUT"
+        else
+          echo "l2=http://127.0.0.1:${{ inputs.l2_port }}" >> "$GITHUB_OUTPUT"
+        fi
     - id: resolve
       uses: actions/github-script@v7
       with:
