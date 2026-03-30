@@ -7,8 +7,9 @@ Start a local **L1 (Anvil)** and **L2 (zksync_os_server)** directly from officia
 - Downloads official binaries + `local-chains.tar.gz`
 - Uses protocol-aware local chains from `./local-chains/<protocol_version>`
 - Falls back to legacy assets for older tags that do not include `local-chains.tar.gz`
-- Boots both **L1 (Anvil)** and **L2 (zksync_os_server)**
-- Exports `ETH_RPC` and `ZKSYNC_RPC` for your subsequent test steps
+- Supports **single-chain** and **multi-chain** setups
+- Boots both **L1 (Anvil)** and one or more **L2 (zksync_os_server)** instances
+- Exports `ETH_RPC` and `ZKSYNC_RPC` (single chain) or `ZKSYNC_RPC_<chain_id>` (multi chain) for your subsequent test steps
 
 ## Quick Start
 
@@ -26,7 +27,7 @@ Example setup:
     version: v1.4.1
 ```
 
-### **Minimal usage (latest stable)**
+### Minimal usage (single chain, latest stable)
 
 ```yaml
 - name: Run ZKsync OS
@@ -36,10 +37,10 @@ Example setup:
     protocol_version: v31.0
 ```
 
-### **Pinned version**
+### Pinned version
 
 ```yaml
-- name: Run ZKsync OS 
+- name: Run ZKsync OS
   uses: dutterbutter/zksync-server-action@v0.1.0
   with:
     version: v0.8.2
@@ -47,7 +48,7 @@ Example setup:
     l2_port: 3050
 ```
 
-### **Include pre-releases**
+### Include pre-releases
 
 ```yaml
 - name: Run ZKsync OS
@@ -57,31 +58,65 @@ Example setup:
     include_prerelease: true
 ```
 
+### Multi-chain setup
+
+Starts one `zksync-os-server` instance per chain listed in `l2_ports`, all sharing a single Anvil L1.
+
+```yaml
+- name: Run ZKsync OS (multi chain)
+  uses: dutterbutter/zksync-server-action@v0.1.0
+  with:
+    version: latest
+    protocol_version: v31.0
+    setup: multi_chain
+    # l2_ports defaults to:
+    #   6565: 3050
+    #   6566: 3051
+```
+
+To start only a subset of chains, or use custom ports, override `l2_ports`:
+
+```yaml
+- name: Run ZKsync OS (multi chain, custom)
+  uses: dutterbutter/zksync-server-action@v0.1.0
+  with:
+    setup: multi_chain
+    l2_ports: |
+      6565: 3050
+```
+
 ## Inputs
 
-| Name                 | Default                        | Description                                         |
-| -------------------- | ------------------------------ | --------------------------------------------------- |
-| `version`            | `latest`                       | Release tag (e.g. `v0.8.2`) or `latest`             |
-| `include_prerelease` | `false`                        | If `true` and `version=latest`, allows pre-releases |
-| `l1_port`            | `8545`                         | L1 RPC port (Anvil)                                 |
-| `l2_port`            | `3050`                         | L2 RPC port (zksync_os_server)                       |
-| `linux_arch`         | `x86_64`                       | Architecture for binary (`x86_64` or `aarch64`)     |
-| `protocol_version`   | `v31.0`                        | Protocol folder under `local-chains` (e.g. `v30.2`, `v31.0`) for `v0.15.0+` |
-| `set_env`            | `true`                         | Export `ETH_RPC` and `ZKSYNC_RPC` to `GITHUB_ENV`   |
-| `anvil_logs`         | `false`                        | Print Anvil log (`.zks/anvil.log`) at the end       |
-| `zksync_logs`        | `false`                        | Print zksync-os-server log (`.zks/zksyncos.log`) at the end |
+| Name                 | Default                        | Description                                                                 |
+| -------------------- | ------------------------------ | --------------------------------------------------------------------------- |
+| `version`            | `latest`                       | Release tag (e.g. `v0.8.2`) or `latest`                                    |
+| `include_prerelease` | `false`                        | If `true` and `version=latest`, allows pre-releases                         |
+| `l1_port`            | `8545`                         | L1 RPC port (Anvil)                                                         |
+| `l2_port`            | `3050`                         | L2 RPC port — **single_chain only**                                         |
+| `linux_arch`         | `x86_64`                       | Architecture for binary (`x86_64` or `aarch64`)                             |
+| `protocol_version`   | `v31.0`                        | Protocol folder under `local-chains` (e.g. `v30.2`, `v31.0`)               |
+| `setup`              | `single_chain`                 | Setup type: `single_chain` or `multi_chain`                                 |
+| `l2_ports`           | `6565: 3050` / `6566: 3051`    | Chain ID → port map — **multi_chain only** (one entry per line)             |
+| `set_env`            | `true`                         | Export RPC URLs to `GITHUB_ENV`                                             |
+| `boot_grace_seconds` | `3`                            | Seconds to wait after starting each server                                  |
+| `anvil_logs`         | `false`                        | Print Anvil log (`.zks/anvil.log`) at the end                               |
+| `zksync_logs`        | `false`                        | Print zksync-os-server log at the end — **single_chain only**               |
+| `config_yaml`        | *(none)*                       | Full YAML config for zksync-os-server — **single_chain only**               |
+| `operator_commit_sk` | *(dev default)*                | Override `l1_sender.operator_commit_sk` — **single_chain only**             |
+| `operator_prove_sk`  | *(dev default)*                | Override `l1_sender.operator_prove_sk` — **single_chain only**              |
+| `operator_execute_sk`| *(dev default)*                | Override `l1_sender.operator_execute_sk` — **single_chain only**            |
 
 ## Outputs
 
-| Name               | Description                         |
-| ------------------ | ----------------------------------- |
-| `l1_rpc_url`       | Local L1 RPC URL                    |
-| `l2_rpc_url`       | Local L2 RPC URL                    |
-| `resolved_version` | Actual tag resolved (e.g. `v0.8.2`) |
-| `anvil_log_path`   | Path to Anvil log (`.zks/anvil.log`) |
-| `zksync_log_path`  | Path to zksync-os-server log (`.zks/zksyncos.log`) |
+| Name               | Description                                                                 |
+| ------------------ | --------------------------------------------------------------------------- |
+| `l1_rpc_url`       | Local L1 RPC URL                                                            |
+| `l2_rpc_url`       | Local L2 RPC URL (single_chain; maps to first chain's port in multi_chain)  |
+| `resolved_version` | Actual tag resolved (e.g. `v0.8.2`)                                         |
+| `anvil_log_path`   | Path to Anvil log (`.zks/anvil.log`)                                        |
+| `zksync_log_path`  | Path to zksync-os-server log (`.zks/zksyncos.log`) — **single_chain only** |
 
-### Configuration inputs
+## Configuration (single_chain)
 
 From `zksync-os-server` `v0.15.0+`, this action uses `local-chains.tar.gz` and:
 
@@ -92,7 +127,7 @@ For tags before `v0.15.0`, it automatically falls back to legacy release assets 
 
 You may configure the server in one of two ways:
 
-#### Option 1: Provide a full YAML config (recommended)
+### Option 1: Provide a full YAML config (recommended)
 
 | Name          | Default  | Description                                                                            |
 | ------------- | -------- | -------------------------------------------------------------------------------------- |
@@ -114,7 +149,7 @@ Example:
 
 ---
 
-#### Option 2: Override individual operator keys
+### Option 2: Override individual operator keys
 
 If `config_yaml` is **not** provided, the action uses the protocol default config from `local-chains` and allows selective overrides of the L1 sender operator keys:
 
@@ -146,43 +181,43 @@ To use it, copy its contents and pass it via the `config_yaml` input.
 
 ---
 
-## Outputs
-
-| Name               | Description                                        |
-| ------------------ | -------------------------------------------------- |
-| `l1_rpc_url`       | Local L1 RPC URL                                   |
-| `l2_rpc_url`       | Local L2 RPC URL                                   |
-| `resolved_version` | Actual tag resolved (e.g. `v0.8.2`)                |
-| `anvil_log_path`   | Path to Anvil log (`.zks/anvil.log`)               |
-| `zksync_log_path`  | Path to zksync-os-server log (`.zks/zksyncos.log`) |
-
 ## Environment Variables
 
-If `set_env` is true (default), these are automatically exported:
+If `set_env` is `true` (default), RPC URLs are automatically exported to `GITHUB_ENV`.
+
+**Single chain:**
 
 ```bash
 ETH_RPC=http://127.0.0.1:8545
 ZKSYNC_RPC=http://127.0.0.1:3050
 ```
 
+**Multi chain** (one variable per chain):
+
+```bash
+ETH_RPC=http://127.0.0.1:8545
+ZKSYNC_RPC_6565=http://127.0.0.1:3050
+ZKSYNC_RPC_6566=http://127.0.0.1:3051
+```
+
 ## Troubleshooting
 
-* **Ports busy:** Adjust `l1_port` / `l2_port` if the runner already uses 8545 or 3050.
+* **Ports busy:** Adjust `l1_port` / `l2_port` (single chain) or the ports in `l2_ports` (multi chain) if the runner already uses those ports.
 * **Logs:**
-
   * `.zks/anvil.log` — Anvil output
-  * `.zks/zksyncos.log` — zksync-os-server output
+  * `.zks/zksyncos.log` — zksync-os-server output (single chain)
+  * `.zks/zksyncos_<chain_id>.log` — per-chain output (multi chain)
 
 Upload them on failure for debugging:
 
-  ```yaml
-  - name: Upload logs
-    if: always()
-    uses: actions/upload-artifact@v4
-    with:
-      name: zks-logs
-      path: .zks/*.log
-  ```
+```yaml
+- name: Upload logs
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: zks-logs
+    path: .zks/*.log
+```
 
 You have two ways to view logs:
 

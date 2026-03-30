@@ -19,20 +19,35 @@ jobs:
         uses: ./
         with:
           version: latest
+          setup: multi_chain
+          l2_ports: |
+            506: 3052
+            6565: 3050
+            6566: 3051
 
       - name: Verify RPCs respond
         run: |
           set -euo pipefail
           echo "ETH_RPC=$ETH_RPC"
-          echo "ZKSYNC_RPC=$ZKSYNC_RPC"
+          echo "ZKSYNC_RPC_506=$ZKSYNC_RPC_506"
+          echo "ZKSYNC_RPC_6565=$ZKSYNC_RPC_6565"
+          echo "ZKSYNC_RPC_6566=$ZKSYNC_RPC_6566"
           curl -sS -X POST "$ETH_RPC" \
             -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | tee /tmp/l1.out
-          curl -sS -X POST "$ZKSYNC_RPC" \
+          curl -sS -X POST "$ZKSYNC_RPC_506" \
             -H 'content-type: application/json' \
-            --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | tee /tmp/l2.out
+            --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | tee /tmp/l2_506.out
+          curl -sS -X POST "$ZKSYNC_RPC_6565" \
+            -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | tee /tmp/l2_6565.out
+          curl -sS -X POST "$ZKSYNC_RPC_6566" \
+            -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | tee /tmp/l2_6566.out
           grep -q '"result"' /tmp/l1.out
-          grep -q '"result"' /tmp/l2.out
+          grep -q '"result"' /tmp/l2_506.out
+          grep -q '"result"' /tmp/l2_6565.out
+          grep -q '"result"' /tmp/l2_6566.out
 
       - name: Upload logs (always)
         if: always()
