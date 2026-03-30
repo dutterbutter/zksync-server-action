@@ -319,6 +319,8 @@ runs:
         export RUST_LOG=info
         export RUST_BACKTRACE=1
 
+        LOCAL_DEV_YAML="$(pwd)/local-chains/local_dev.yaml"
+
         if [[ "${{ inputs.setup }}" == "multi_chain" ]]; then
           MULTI_DIR="$(pwd)/local-chains/${{ inputs.protocol_version }}/multi_chain"
           if [[ ! -d "$MULTI_DIR" ]]; then
@@ -339,7 +341,6 @@ runs:
             exit 1
           fi
 
-          LOCAL_DEV_YAML="$(pwd)/local-chains/local_dev.yaml"
           local_dev_abs=""
           if [[ -f "$LOCAL_DEV_YAML" ]]; then
             local_dev_abs="$LOCAL_DEV_YAML"
@@ -388,7 +389,6 @@ runs:
 
           CONFIG_ABS="${{ steps.config.outputs.path }}"
 
-          LOCAL_DEV_YAML="$(pwd)/local-chains/local_dev.yaml"
           if [[ -f "$LOCAL_DEV_YAML" ]]; then
             echo "Found local_dev.yaml at $LOCAL_DEV_YAML; will prepend to --config"
             CONFIG_ARG="${LOCAL_DEV_YAML}:${CONFIG_ABS}"
