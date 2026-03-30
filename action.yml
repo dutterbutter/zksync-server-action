@@ -339,10 +339,10 @@ runs:
             exit 1
           fi
 
-          LOCAL_DEV_YAML="../local-chains/local_dev.yaml"
+          LOCAL_DEV_YAML="$(pwd)/local-chains/local_dev.yaml"
           local_dev_abs=""
           if [[ -f "$LOCAL_DEV_YAML" ]]; then
-            local_dev_abs="$(realpath "$LOCAL_DEV_YAML")"
+            local_dev_abs="$LOCAL_DEV_YAML"
             echo "Found local_dev.yaml at $local_dev_abs; will prepend to --config"
           fi
 
@@ -388,11 +388,10 @@ runs:
 
           CONFIG_ABS="${{ steps.config.outputs.path }}"
 
-          LOCAL_DEV_YAML="../local-chains/local_dev.yaml"
+          LOCAL_DEV_YAML="$(pwd)/local-chains/local_dev.yaml"
           if [[ -f "$LOCAL_DEV_YAML" ]]; then
-            LOCAL_DEV_ABS="$(realpath "$LOCAL_DEV_YAML")"
-            echo "Found local_dev.yaml at $LOCAL_DEV_ABS; will prepend to --config"
-            CONFIG_ARG="${LOCAL_DEV_ABS}:${CONFIG_ABS}"
+            echo "Found local_dev.yaml at $LOCAL_DEV_YAML; will prepend to --config"
+            CONFIG_ARG="${LOCAL_DEV_YAML}:${CONFIG_ABS}"
           else
             CONFIG_ARG="$CONFIG_ABS"
           fi
