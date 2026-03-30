@@ -319,6 +319,8 @@ runs:
         export RUST_LOG=info
         export RUST_BACKTRACE=1
 
+        LOCAL_DEV_YAML="$(pwd)/local-chains/local_dev.yaml"
+
         if [[ "${{ inputs.setup }}" == "multi_chain" ]]; then
           MULTI_DIR="$(pwd)/local-chains/${{ inputs.protocol_version }}/multi_chain"
           if [[ ! -d "$MULTI_DIR" ]]; then
@@ -339,6 +341,12 @@ runs:
             exit 1
           fi
 
+          local_dev_abs=""
+          if [[ -f "$LOCAL_DEV_YAML" ]]; then
+            local_dev_abs="$LOCAL_DEV_YAML"
+            echo "Found local_dev.yaml at $local_dev_abs; will prepend to --config"
+          fi
+
           for chain_id in $(echo "${!PORT_MAP[@]}" | tr ' ' '\n' | sort); do
             config_file="$MULTI_DIR/chain_${chain_id}.yaml"
 
@@ -347,9 +355,15 @@ runs:
               exit 1
             fi
 
+            if [[ -n "$local_dev_abs" ]]; then
+              config_arg="${local_dev_abs}:${config_file}"
+            else
+              config_arg="$config_file"
+            fi
+
             log_file="zksyncos_${chain_id}.log"
-            echo "Starting chain $chain_id with config: $config_file"
-            setsid bash -c "exec ./zksync-os-server --config \"$config_file\" </dev/null >>\"$log_file\" 2>&1" &
+            echo "Starting chain $chain_id with config: $config_arg"
+            setsid bash -c "exec ./zksync-os-server --config \"$config_arg\" </dev/null >>\"$log_file\" 2>&1" &
             echo $! > "l2_${chain_id}.pid"
             sleep "${{ inputs.boot_grace_seconds }}"
           done
@@ -375,8 +389,15 @@ runs:
 
           CONFIG_ABS="${{ steps.config.outputs.path }}"
 
-          echo "Launching: ./zksync-os-server --config $CONFIG_ABS"
-          setsid bash -c "exec ./zksync-os-server --config \"$CONFIG_ABS\" </dev/null >>zksyncos.log 2>&1" &
+          if [[ -f "$LOCAL_DEV_YAML" ]]; then
+            echo "Found local_dev.yaml at $LOCAL_DEV_YAML; will prepend to --config"
+            CONFIG_ARG="${LOCAL_DEV_YAML}:${CONFIG_ABS}"
+          else
+            CONFIG_ARG="$CONFIG_ABS"
+          fi
+
+          echo "Launching: ./zksync-os-server --config $CONFIG_ARG"
+          setsid bash -c "exec ./zksync-os-server --config \"$CONFIG_ARG\" </dev/null >>zksyncos.log 2>&1" &
           echo $! > l2.pid
 
           sleep "${{ inputs.boot_grace_seconds }}"
@@ -390,7 +411,7 @@ runs:
             echo "::endgroup::"
 
             echo "::group::try foreground run to capture error"
-            ./zksync-os-server --config "$CONFIG_ABS" || true
+            ./zksync-os-server --config "$CONFIG_ARG" || true
             echo "::endgroup::"
 
             exit 1
